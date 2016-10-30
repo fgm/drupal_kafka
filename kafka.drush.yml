@@ -1,0 +1,16 @@
+commands:
+  # Queue API related commands
+
+  kafka-high-level-consumer-demo:
+    aliases: ['khlcd']
+    description: 'Demoes the high-level Kafka consumer.'
+    # options:
+    #  all: 'Also list workers not configured for Beanstalkd handling.'
+
+  kafka-low-level-consumer-demo:
+    aliases: ['kllcd']
+    description: 'Demoes the low-level Kafka consumer.'
+
+  kafka-producer-demo:
+    aliases: ['kpd']
+    description: 'Demoes the Kafka producer by submitting 1 message per second for 10 seconds.'
