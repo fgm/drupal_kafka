@@ -1,5 +1,10 @@
 <?php
 
+/**
+ * @file
+ * Installer for Kafka module.
+ */
+
 use Drupal\Core\Link;
 
 /**
@@ -9,7 +14,6 @@ function kafka_requirements($phase) {
   $ret = [
     'title' => 'Kafka',
     'value' => Link::createFromRoute(t('A-OK'), 'kafka.report'),
-    // 'description' => t('I say OK'),
     'severity' => REQUIREMENT_OK,
   ];
 

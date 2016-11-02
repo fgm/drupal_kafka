@@ -5,7 +5,12 @@ namespace Drupal\kafka;
 use Drupal\Core\Site\Settings;
 use RdKafka\Conf;
 
+/**
+ * Class ClientFactory builds instances of producers and consumers.
+ */
 class ClientFactory {
+  const METADATA_TIMEOUT = 100;
+
   /**
    * The Kafka settings.
    *
@@ -13,11 +18,29 @@ class ClientFactory {
    */
   protected $settings;
 
+  /**
+   * ClientFactory constructor.
+   *
+   * @param \Drupal\Core\Site\Settings $settings
+   *   The core settings service.
+   */
   public function __construct(Settings $settings) {
     $this->settings = $settings->get('kafka');
   }
 
-  public function create($type, Conf $conf = null) {
+  /**
+   * The client factory method.
+   *
+   * @param string $type
+   *   Strings "low" and "high" for consumers, "producer" for producers.
+   * @param \RdKafka\Conf|null $conf
+   *   Optional. A configuration object. For high-level consumers, this is the
+   *   only way to assign broker IP from settings.
+   *
+   * @return \RdKafka\Consumer|\RdKafka\KafkaConsumer|\RdKafka\Producer
+   *   A client instance.
+   */
+  public function create($type, Conf $conf = NULL) {
     switch ($type) {
       case 'low':
         $class = 'RdKafka\Consumer';
@@ -70,14 +93,14 @@ class ClientFactory {
       $rdk->setLogLevel(LOG_INFO);
 
       /** @var \RdKafka\Metadata $meta */
-      $meta = $rdk->getMetadata(TRUE, null, 100);
+      $meta = $rdk->getMetadata(TRUE, NULL, self::METADATA_TIMEOUT);
 
       /** @var \RdKafka\Metadata\Collection $topics */
       $rkTopics = $meta->getTopics();
 
       /** @var \RdKafka\Metadata\Topic $topic */
       foreach ($rkTopics as $topic) {
-        $topics[$topic->getTopic()] = TRUE;
+        $topics[$topic->getTopic()] = NULL;
       }
     }
     $topics = array_keys($topics);

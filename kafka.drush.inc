@@ -1,11 +1,18 @@
 <?php
 
-use Symfony\Component\Yaml\Yaml;
-use RdKafka\Conf;
-use RdKafka\Consumer;
-use RdKafka\Producer;
-use RdKafka\TopicConf;
+/**
+ * @file
+ * Drush plugin for Kafka module.
+ */
 
+use RdKafka\Conf;
+use RdKafka\KafkaConsumer;
+use RdKafka\TopicConf;
+use Symfony\Component\Yaml\Yaml;
+
+/**
+ * Implements hook_drush_command().
+ */
 function kafka_drush_command() {
   $file = preg_replace('/(inc|php)$/', 'yml', __FILE__);
   $config = Yaml::parse(file_get_contents($file));
@@ -13,12 +20,17 @@ function kafka_drush_command() {
   return $items;
 }
 
+/**
+ * Drush callback for "kafka-high-level-consumer-demo".
+ *
+ * @throws \Exception
+ */
 function drush_kafka_high_level_consumer_demo() {
-  $conf = new RdKafka\Conf();
+  $conf = new Conf();
   $t0 = time();
   // Set a rebalance callback to log partition assignemts (optional)
   $conf->setRebalanceCb(function (
-    RdKafka\KafkaConsumer $kafka,
+    KafkaConsumer $kafka,
     $err,
     array $partitions = NULL
   ) {
@@ -44,25 +56,24 @@ function drush_kafka_high_level_consumer_demo() {
   // different partitions.
   $conf->set('group.id', 'myConsumerGroup');
 
-  // Initial list of Kafka brokers
-  // Not needed with the Drupal service: defaulted from settings.
-  // $conf->set('metadata.broker.list', '127.0.0.1');
-
-  $topicConf = new RdKafka\TopicConf();
+  /* Initial list of Kafka brokers. Not needed with the Drupal service.
+  $conf->set('metadata.broker.list', '127.0.0.1');
+   */
+  $topicConf = new TopicConf();
 
   // Set where to start consuming messages when there is no initial offset in
   // offset store or the desired offset is out of range.
-  // 'smallest': start from the beginning
+  // 'smallest': start from the beginning.
   $topicConf->set('auto.offset.reset', 'smallest');
 
-  // Set the configuration to use for subscribed/assigned topics
+  // Set the configuration to use for subscribed/assigned topics.
   $conf->setDefaultTopicConf($topicConf);
 
   /** @var \Drupal\kafka\ClientFactory $clientFactory */
   $clientFactory = \Drupal::service('kafka.client_factory');
   $consumer = $clientFactory->create('high', $conf);
 
-  // Subscribe to topic 'test'
+  // Subscribe to topic 'drupal'.
   $consumer->subscribe(['drupal']);
 
   echo "Waiting for partition assignment... (make take some time when\n";
@@ -75,20 +86,21 @@ function drush_kafka_high_level_consumer_demo() {
     $message = $consumer->consume(120 * 1000);
     switch ($message->err) {
       case RD_KAFKA_RESP_ERR_NO_ERROR:
-        //var_dump($message);
         $count++;
         break;
+
       case RD_KAFKA_RESP_ERR__PARTITION_EOF:
         echo "No more messages; will not wait for more\n";
         $continue = FALSE;
         break;
+
       case RD_KAFKA_RESP_ERR__TIMED_OUT:
         echo "Timed out\n";
         $continue = FALSE;
         break;
+
       default:
         throw new \Exception($message->errstr(), $message->err);
-        break;
     }
   }
 
@@ -97,18 +109,21 @@ function drush_kafka_high_level_consumer_demo() {
   echo "setup: " . ($t1 - $t0) . " sec, delay: " . ($t2 - $t1) . "\n";
 }
 
+/**
+ * Drush callback for "kafka-low-level-consumer-demo".
+ */
 function drush_kafka_low_level_consumer_demo() {
   $rk = \Drupal::service('kafka.low_level_consumer');
   $rk->setLogLevel(LOG_WARNING);
+  $debug = FALSE;
 
   $topic = $rk->newTopic('drupal');
 
   // The first argument is the partition to consume from.
-  // The second argument is the offset at which to start consumption. Valid values
-  // are: RD_KAFKA_OFFSET_BEGINNING, RD_KAFKA_OFFSET_END, RD_KAFKA_OFFSET_STORED.
+  // The second argument is the offset at which to start consumption. Valid
+  // values are: RD_KAFKA_OFFSET_BEGINNING, RD_KAFKA_OFFSET_END,
+  // RD_KAFKA_OFFSET_STORED.
   $topic->consumeStart(0, RD_KAFKA_OFFSET_BEGINNING);
-  //$topic->consumeStart(0, RD_KAFKA_OFFSET_STORED);
-  //$topic->consumeStart(0, RD_KAFKA_OFFSET_END);
 
   echo ($t0 = time()) . "\n";
   $count = 0;
@@ -121,8 +136,8 @@ function drush_kafka_low_level_consumer_demo() {
       echo $msg->errstr(), "\n";
       break;
     }
-    else {
-      // echo 'Message: [' . $msg->payload . "]\n";
+    elseif ($debug) {
+      drush_print('Message: [' . $msg->payload . "]");
     }
   }
   echo "count: $count\n";
@@ -130,6 +145,9 @@ function drush_kafka_low_level_consumer_demo() {
   echo "delay: " . ($t1 - $t0) . "\n";
 }
 
+/**
+ * Drush callback for "kafka-producer-demo".
+ */
 function drush_kafka_producer_demo() {
   $rk = \Drupal::service('kafka.producer');
   $rk->setLogLevel(LOG_WARNING);

@@ -19,6 +19,12 @@ class Requirements {
     7 => '2.0.0',
   ];
 
+  /**
+   * Script callback for pre-install / pre-update.
+   *
+   * @param \Composer\Script\Event $event
+   *   The Composer event triggering this call. Not used.
+   */
   public static function validate(Event $event) {
     // Probably redundant with the composer.json php requirement.
     if (version_compare(PHP_VERSION, self::MIN_PHP) < 0) {
@@ -44,4 +50,5 @@ class Requirements {
       ]));
     }
   }
+
 }

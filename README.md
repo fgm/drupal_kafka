@@ -9,9 +9,14 @@
 * Drupal 8 [Queue API] backend. Queue names map to Kafka topics.
   * Standard Drush commands to consume the queue: `drush queue-list` / `drush queue-run` 
 * (planned): [PSR-3] Log appender. Logger channels map to Kafka topics.
-* Drush commands to check proper operation of the high-level consumer, low-level
-  consumer, and producer in relation with a Kafka instance, e.g.  check IP / 
-  port / credentials
+* Drush commands to 
+  * check proper operation of the high-level consumer, low-level
+    consumer, and producer in relation with a Kafka instance, e.g.  check IP / 
+    port / credentials: 
+    * `drush kpd`: producer demo
+    * `drush khlcd`: high-level consumer demo
+    * `drush kllcd`: low-level consumer demo
+  * check available topics `drush kafka-topics`.
 
 Based on [`php_rdkafka`] / [`librdkafka`].
 
@@ -30,7 +35,7 @@ version 2.0 or later (SPDX: GPL-2.0+).
 ## Install
 
 * Install the Drupal 8 site without the module.
-* Get access and topic information for a Kafka 0.10 broker.
+* Get IP, port, and list of topics names for the Kafka 0.10 broker you will be using.
 * Install the `librdkafka` client library.
 * Install the `php-rdkafka` PHP extension version 1 or 2 (see "Requirements" for details). In 2016-11, this means building from sources.
 * Install the module as usual

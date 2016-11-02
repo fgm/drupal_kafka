@@ -2,10 +2,12 @@
 
 namespace Drupal\kafka\Plugin\QueueWorker;
 
-
 use Drupal\Core\Queue\QueueGarbageCollectionInterface;
 use Drupal\Core\Queue\QueueInterface;
 
+/**
+ * Class KafkaQueue is a Drupal Queue backend.
+ */
 class KafkaQueue implements QueueInterface, QueueGarbageCollectionInterface {
 
   /**
@@ -123,4 +125,5 @@ class KafkaQueue implements QueueInterface, QueueGarbageCollectionInterface {
   public function deleteQueue() {
     // TODO: Implement deleteQueue() method.
   }
+
 }
