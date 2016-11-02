@@ -1,45 +1,68 @@
-# General mapping of Drupal Queue API to Kafka
-## Data mapping
+# [Kafka] for [Drupal] 8
 
-* Drupal queue → Kafka topic
-  * mapped as 1 instance of Producer and 1 of low-level Consumer
-  * n web servers → 2 * n partitions in topic
-  * topics are pre-allocated during deployment to avoid possibility of 
-    random topic generation at runtime (needed because Kafka is mostly used at
-    large scale in tightened security environments)
-* Drupal site → Kafka ConsumerGroup
+[Kafka]: https://kafka.apache.org/
+[Drupal]:  https://drupal.org/
+
+
+## Features
+
+* Drupal 8 [Queue API] backend. Queue names map to Kafka topics.
+  * Standard Drush commands to consume the queue: `drush queue-list` / `drush queue-run` 
+* (planned): [PSR-3] Log appender. Logger channels map to Kafka topics.
+* Drush commands to check proper operation of the high-level consumer, low-level
+  consumer, and producer in relation with a Kafka instance, e.g.  check IP / 
+  port / credentials
+
+Based on [`php_rdkafka`] / [`librdkafka`].
+
+[`librdkafka`]: https://github.com/edenhill/librdkafka
+[`php_rdkafka`]: https://github.com/arnaud-lb/php-rdkafka
+[PSR-3]: http://www.php-fig.org/psr/psr-3/
+[Queue API]: https://api.drupal.org/api/drupal/core%21core.api.php/group/queue/8.2.x
+
+
+## License
+
+Like any Drupal plugin, the module is licensed under the General Public License,
+version 2.0 or later (SPDX: GPL-2.0+).
+
+
+## Install
+
+* Install the Drupal 8 site without the module.
+* Get access and topic information for a Kafka 0.10 broker.
+* Install the `librdkafka` client library.
+* Install the `php-rdkafka` PHP extension version 1 or 2 (see "Requirements" for details). In 2016-11, this means building from sources.
+* Install the module as usual
+* Configure Drupal `settings.php` to expose the Kafka queue, either as the default queue backend, or for specific queue names:
+
+        $settings['queue_default'] = 'queue.kafka';
+        $settings['queue_service_{queue_name}'] = 'queue.kafka';
+
+## Requirements
+
+* Drupal 8.2.0 or later
+* Apache Kafka 0.10.1.0 or later
+* `libradkafka`
+* `php-rdkafka` master 2016-11-01 or more recent
+  * 2.0.0 or later for PHP 7.x
+  * 1.0.0 or later for PHP 5.6.x
+  * 0.9.1 is __NOT__ usable
+* PHP 5.6.27 or more recent. Slightly earlier versions _might_ work but have not been evaluated
+
+## Limitations
+
+At this point:
  
-## API mapping
+  * The module does _not_ provide a "reliable" queue service in the Drupal sense
+    (`ReliableQueueInterface`). See Kafka documentation about why this is so: 
+    the exact reliability guarantees provided depend on the Kafka topic 
+    configuration.
+  * Using the module during site installation is not supported.
+  
+Topics handling:
 
-* Queue operations
-  * createQueue("foo"):
-    * if topic exists in Kafka, mark as available in Drupal
-    * else throw
-    * do nothing in Kafka itself
-  * $q->deleteQueue():
-    * mark as deleted in Drupal
-    * do nothing in Kafka
-  * $q->numberOfItems() → not available (not meaningful)
-* Item operations
-  * $q->createItem → produce items until one is not in deleted list
-  * $q->claimItem → save current offset, Consumer::consume(), store new offset
-  * $q->deleteItem → do nothing in Kafka, add item offset to deleted list  
-  * $q->releaseItem → do nothing in Kafka, rollback to saved offset
-* Extra services
-  * Cron: purge deleted lists from items no longer in Kafka
-    * fetch offset of first item since start
-    * delete lower offsets from deleted list
-  * Deleted list: not deleted on queue "deletion", since it will still be needed
-    if the queue is recreated under the same name, matching the same topic
-
-## Issues
-
-* High-level Consumer doesn't seem to work, at least not with the current 
-  version (0.9.1) of librdkafka, the extension, and Kafka (kafka_2.11-0.10.1.0).
-* Topic creation: many use cases in Drupal assume queue creation/deletion is 
-  dynamic, but librdkafka does not support topic creation/deletion, it needs to
-  have automatic creation enabled
-* Topic deletion: deleted topics are not (immediately) available for re-creation 
-  under the same name
-* Minor: Latency at low data load: 80 msec local
-  * But high throughput at high load: 350 k items/sec local
+  * In production instances, automatic topic creation/deletion is usually not
+    enabled, for various reasons, so they need to be created and deleted out of 
+    band. 
+  * On development instances, you may configure automatic topic creation/deletion.

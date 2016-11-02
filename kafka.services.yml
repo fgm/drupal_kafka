@@ -1,0 +1,17 @@
+parameters:
+  kafka:
+    consumer: '@kafka.high_level_consumer'
+
+services:
+  queue.kafka:
+    class: 'Drupal\kafka\Queue\KakfaQueue'
+    arguments: ['@keyvalue']
+
+  kafka.high_level_consumer:
+    class: 'Drupal\kafka\HighLevelConsumer'
+
+  kafka.low_level_consumer:
+    class: 'Drupal\kafka\LowLevelConsumer'
+
+  kafka.producer:
+    class: 'Drupal\kafka\Producer'
