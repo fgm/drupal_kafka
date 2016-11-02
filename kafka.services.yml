@@ -4,8 +4,8 @@ parameters:
 
 services:
   queue.kafka:
-    class: 'Drupal\kafka\Queue\KakfaQueue'
-    arguments: ['@keyvalue']
+    class: 'Drupal\kafka\Queue\KafkaQueueFactory'
+    arguments: ['@kafka.client_factory', '@keyvalue', '@settings']
 
   kafka.client_factory:
     class: 'Drupal\kafka\ClientFactory'

@@ -1,6 +1,6 @@
 <?php
 
-namespace Drupal\kafka\Plugin\QueueWorker;
+namespace Drupal\kafka\Queue;
 
 use Drupal\Core\Queue\QueueGarbageCollectionInterface;
 use Drupal\Core\Queue\QueueInterface;
@@ -116,7 +116,7 @@ class KafkaQueue implements QueueInterface, QueueGarbageCollectionInterface {
    * depends on the queue implementation if this is necessary at all).
    */
   public function createQueue() {
-    // TODO: Implement createQueue() method.
+    $topics = $this->clientFactory->getTopics();
   }
 
   /**
