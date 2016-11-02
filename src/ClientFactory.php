@@ -9,7 +9,7 @@ use RdKafka\Conf;
  * Class ClientFactory builds instances of producers and consumers.
  */
 class ClientFactory {
-  const METADATA_TIMEOUT = 100;
+  const METADATA_TIMEOUT = 1000;
 
   /**
    * The Kafka settings.
