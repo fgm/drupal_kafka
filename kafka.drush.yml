@@ -14,3 +14,7 @@ commands:
   kafka-producer-demo:
     aliases: ['kpd']
     description: 'Demoes the Kafka producer by submitting 1 message per second for 10 seconds.'
+
+  kafka-topics:
+    aliases: ['kt']
+    description: 'Gets the available Kafka topics.'

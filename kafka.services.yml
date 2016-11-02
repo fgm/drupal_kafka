@@ -7,11 +7,21 @@ services:
     class: 'Drupal\kafka\Queue\KakfaQueue'
     arguments: ['@keyvalue']
 
+  kafka.client_factory:
+    class: 'Drupal\kafka\ClientFactory'
+    arguments: ['@settings']
+
   kafka.high_level_consumer:
-    class: 'Drupal\kafka\HighLevelConsumer'
+    class: 'RdKafka\KafkaConsumer'
+    factory: ['@kafka.client_factory', 'create']
+    arguments: ['high']
 
   kafka.low_level_consumer:
-    class: 'Drupal\kafka\LowLevelConsumer'
+    class: 'RdKafka\Consumer'
+    factory: ['@kafka.client_factory', 'create']
+    arguments: ['low']
 
   kafka.producer:
-    class: 'Drupal\kafka\Producer'
+    class: 'RdKafka\Producer'
+    factory: ['@kafka.client_factory', 'create']
+    arguments: ['producer']

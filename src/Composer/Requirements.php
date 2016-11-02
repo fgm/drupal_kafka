@@ -8,7 +8,8 @@ use Composer\Script\Event;
  * Class Requirements is a Composer script checker for PHP/extension versions.
  *
  * Note that it only works if composer install/update is invoked directly, not
- * as a dependency.
+ * as a dependency. But you may also use this from the script in the main
+ * project composer.json if you add an appropriate autoload clause.
  */
 class Requirements {
   const EXTENSION = 'rdkafka';

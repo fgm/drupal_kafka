@@ -34,10 +34,21 @@ version 2.0 or later (SPDX: GPL-2.0+).
 * Install the `librdkafka` client library.
 * Install the `php-rdkafka` PHP extension version 1 or 2 (see "Requirements" for details). In 2016-11, this means building from sources.
 * Install the module as usual
-* Configure Drupal `settings.php` to expose the Kafka queue, either as the default queue backend, or for specific queue names:
+* Configure Drupal `settings.php` to expose the Kafka queue, either as the 
+  default queue backend, or for specific queue names, and point the services to
+  the chosen Kafka brokers.
 
         $settings['queue_default'] = 'queue.kafka';
         $settings['queue_service_{queue_name}'] = 'queue.kafka';
+        $settings['kafka'] = [
+          'consumer' => [
+            'brokers' => ['127.0.0.1']
+          ],
+          'producer' => [
+            'brokers' => ['127.0.0.1'],
+          ],
+        ];
+
 
 ## Requirements
 

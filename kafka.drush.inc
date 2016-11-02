@@ -15,7 +15,7 @@ function kafka_drush_command() {
 
 function drush_kafka_high_level_consumer_demo() {
   $conf = new RdKafka\Conf();
-  $t0 = microtime(TRUE);
+  $t0 = time();
   // Set a rebalance callback to log partition assignemts (optional)
   $conf->setRebalanceCb(function (
     RdKafka\KafkaConsumer $kafka,
@@ -40,12 +40,13 @@ function drush_kafka_high_level_consumer_demo() {
     }
   });
 
-// Configure the group.id. All consumer with the same group.id will consume
-// different partitions.
+  // Configure the group.id. All consumer with the same group.id will consume
+  // different partitions.
   $conf->set('group.id', 'myConsumerGroup');
 
-// Initial list of Kafka brokers
-  $conf->set('metadata.broker.list', '127.0.0.1');
+  // Initial list of Kafka brokers
+  // Not needed with the Drupal service: defaulted from settings.
+  // $conf->set('metadata.broker.list', '127.0.0.1');
 
   $topicConf = new RdKafka\TopicConf();
 
@@ -57,20 +58,25 @@ function drush_kafka_high_level_consumer_demo() {
   // Set the configuration to use for subscribed/assigned topics
   $conf->setDefaultTopicConf($topicConf);
 
-  $consumer = new RdKafka\KafkaConsumer($conf);
+  /** @var \Drupal\kafka\ClientFactory $clientFactory */
+  $clientFactory = \Drupal::service('kafka.client_factory');
+  $consumer = $clientFactory->create('high', $conf);
 
   // Subscribe to topic 'test'
   $consumer->subscribe(['drupal']);
 
   echo "Waiting for partition assignment... (make take some time when\n";
-  echo "quickly re-joinging the group after leaving it.)\n";
+  echo "quickly re-joining the group after leaving it.)\n";
 
+  echo ($t1 = time()) . "\n";
+  $count = 0;
   $continue = TRUE;
   while ($continue) {
     $message = $consumer->consume(120 * 1000);
     switch ($message->err) {
       case RD_KAFKA_RESP_ERR_NO_ERROR:
         //var_dump($message);
+        $count++;
         break;
       case RD_KAFKA_RESP_ERR__PARTITION_EOF:
         echo "No more messages; will not wait for more\n";
@@ -86,17 +92,15 @@ function drush_kafka_high_level_consumer_demo() {
     }
   }
 
-  $t1 = microtime(TRUE);
-  echo ($t1 - $t0);
+  echo "count: $count\n";
+  echo ($t2 = time()) . "\n";
+  echo "setup: " . ($t1 - $t0) . " sec, delay: " . ($t2 - $t1) . "\n";
 }
 
 function drush_kafka_low_level_consumer_demo() {
-  $rk = new Consumer();
+  $rk = \Drupal::service('kafka.low_level_consumer');
   $rk->setLogLevel(LOG_WARNING);
-  //$rk->addBrokers('10.176.178.39,127.0.0.1,::1');
-  $rk->addBrokers('127.0.0.1');
 
-  print_r($rk->metadata(TRUE, NULL, 100));
   $topic = $rk->newTopic('drupal');
 
   // The first argument is the partition to consume from.
@@ -127,9 +131,8 @@ function drush_kafka_low_level_consumer_demo() {
 }
 
 function drush_kafka_producer_demo() {
-  $rk = new Producer();
-  $rk->setLogLevel(LOG_DEBUG);
-  $rk->addBrokers("127.0.0.1");
+  $rk = \Drupal::service('kafka.producer');
+  $rk->setLogLevel(LOG_WARNING);
   $topic = $rk->newTopic('drupal');
 
   $max = 1E6;
@@ -143,4 +146,15 @@ function drush_kafka_producer_demo() {
   $t1 = microtime(TRUE);
   $rate = round($max / ($t1 - $t0));
   echo "\n$max messages @ $rate msg/sec\n";
+}
+
+/**
+ * Drush callback for "kafka-topics".
+ */
+function drush_kafka_topics() {
+  /** @var \Drupal\kafka\ClientFactory $clientFactory */
+  $clientFactory = \Drupal::service('kafka.client_factory');
+  $topics = ['topics' => $clientFactory->getTopics()];
+  $yamlTopics = Yaml::dump($topics);
+  drush_print($yamlTopics);
 }
