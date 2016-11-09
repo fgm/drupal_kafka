@@ -82,14 +82,18 @@ class ClientFactory {
    *   __consumer_offsets.
    */
   public function getTopics() {
+    $t0 = microtime(TRUE);
     $topics = [];
 
+    // Expected time (local): 0.5 msec = 2000/sec.
     $sources = [
       $this->create('producer'),
       $this->create('low'),
     ];
 
-    foreach ($sources as $rdk) {
+    // Expected time per pass (local, 1 topic): 36 msec = 28/sec
+    // Should be O(n)*O(m) per pass/topic.
+    foreach ($sources as $index => $rdk) {
       $rdk->setLogLevel(LOG_INFO);
 
       /** @var \RdKafka\Metadata $meta */
@@ -103,8 +107,19 @@ class ClientFactory {
         $topics[$topic->getTopic()] = NULL;
       }
     }
+
+    // Expected time for 1 topics: 0.004 msec = 250k /sec
+    // Should be O(n*log(n)) on topic count.
     $topics = array_keys($topics);
     sort($topics);
+
+    $t1 = microtime(TRUE);
+
+    $topics = [
+      'topics' => $topics,
+      'duration' => $t1 - $t0
+    ];
+
     return $topics;
   }
 

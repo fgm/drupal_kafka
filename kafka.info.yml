@@ -1,4 +1,4 @@
-name: kafka
+name: Kafka
 type: module
 description: Queue API adapter for Apache Kafka
 core: 8.x

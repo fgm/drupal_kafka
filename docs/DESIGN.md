@@ -9,6 +9,7 @@
     large scale in tightened security environments)
 * Drupal site → Kafka ConsumerGroup
  
+ 
 ## API mapping
 
 * Queue operations
@@ -34,15 +35,16 @@
   * Deleted list: not deleted on queue "deletion", since it will still be needed
     if the queue is recreated under the same name, matching the same topic
 
+
 ## Issues
 
-* High-level Consumer doesn't with the relased version (0.9.1, seen with Magnus 
+* High-level Consumer doesn't work with relased version 0.9.1 (seen with Magnus 
   Edenhill) of librdkafka, the extension, and Kafka (kafka_2.11-0.10.1.0). But
   it works with the 2.0.0 dev HEAD, compiled locally.
 * Topic creation: many use cases in Drupal assume queue creation/deletion is 
-  dynamic, but librdkafka does not support topic creation/deletion, it needs to
-  have automatic creation enabled, or rely on out-of-band (e.g. scripts) topic 
-  creation/deletion.
+  dynamic, but `librdkafka` does not support topic creation/deletion, it needs 
+  to have automatic creation enabled, or rely on out-of-band (e.g. scripts) 
+  topic creation/deletion.
 * Topic deletion: deleted topics are not (immediately) available for re-creation 
   under the same name.
 * Minor: high Latency at low data load: 80 msec local

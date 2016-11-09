@@ -2,6 +2,7 @@
 
 namespace Drupal\kafka\Queue;
 
+use Drupal\Core\KeyValueStore\KeyValueFactoryInterface;
 use Drupal\Core\KeyValueStore\KeyValueStoreInterface;
 use Drupal\Core\Site\Settings;
 use Drupal\kafka\ClientFactory;
@@ -35,14 +36,16 @@ class KafkaQueueFactory {
   /**
    * KafkaQueue constructor.
    *
-   * @param \Drupal\Core\KeyValueStore\KeyValueStoreInterface $kv
+   * @param \Drupal\Core\KeyValueStore\KeyValueFactoryInterface $kv
    *   The keyvalue service.
    * @param \Drupal\kafka\ClientFactory $clientFactory
    *   The kafka.client_factory service.
+   * @param \Drupal\Core\Site\Settings $settings
+   *   The settings service.
    */
   public function __construct(
     ClientFactory $clientFactory,
-    KeyValueStoreInterface $kv,
+    KeyValueFactoryInterface $kv,
     Settings $settings) {
       $this->clientFactory = $clientFactory;
       $this->kv = $kv;

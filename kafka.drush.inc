@@ -21,6 +21,21 @@ function kafka_drush_command() {
 }
 
 /**
+ * @param array<int,\RdKafka\TopicPartition> $partitions
+ */
+function _kafka_dump_partitions(array $partitions, $label = NULL) {
+  if ($label) {
+    /** @var \RdKafka\TopicPartition $partition */
+    $partition = reset($partitions);
+    echo $label . $partition->getTopic() . "\n";
+  }
+  echo implode('', array_map(function (\RdKafka\TopicPartition $partition) {
+    return sprintf('%4s:%-8s%s', $partition->getPartition(), $partition->getOffset(),
+      ($partition->getPartition() + 1) % 10 ? '' : "\n");
+  }, $partitions)) . "\n";
+}
+
+/**
  * Drush callback for "kafka-high-level-consumer-demo".
  *
  * @throws \Exception
@@ -29,21 +44,19 @@ function drush_kafka_high_level_consumer_demo() {
   $conf = new Conf();
   $t0 = time();
   // Set a rebalance callback to log partition assignemts (optional)
-  $conf->setRebalanceCb(function (
+  0 && $conf->setRebalanceCb(function (
     KafkaConsumer $kafka,
     $err,
     array $partitions = NULL
   ) {
     switch ($err) {
       case RD_KAFKA_RESP_ERR__ASSIGN_PARTITIONS:
-        echo "Assign: ";
-        var_dump($partitions);
+        _kafka_dump_partitions($partitions, "Assign on: ");
         $kafka->assign($partitions);
         break;
 
       case RD_KAFKA_RESP_ERR__REVOKE_PARTITIONS:
-        echo "Revoke: ";
-        var_dump($partitions);
+        // _kafka_dump_partitions($partitions, "Revoke on: ");
         $kafka->assign(NULL);
         break;
 
@@ -107,12 +120,18 @@ function drush_kafka_high_level_consumer_demo() {
   echo "count: $count\n";
   echo ($t2 = time()) . "\n";
   echo "setup: " . ($t1 - $t0) . " sec, delay: " . ($t2 - $t1) . "\n";
+
+  if ($count) {
+    $consumer->commit();
+  }
+  $consumer->unsubscribe();
 }
 
 /**
  * Drush callback for "kafka-low-level-consumer-demo".
  */
 function drush_kafka_low_level_consumer_demo() {
+  /** @var \RdKafka\Consumer $rk */
   $rk = \Drupal::service('kafka.low_level_consumer');
   $rk->setLogLevel(LOG_WARNING);
   $debug = FALSE;
@@ -172,7 +191,7 @@ function drush_kafka_producer_demo() {
 function drush_kafka_topics() {
   /** @var \Drupal\kafka\ClientFactory $clientFactory */
   $clientFactory = \Drupal::service('kafka.client_factory');
-  $topics = ['topics' => $clientFactory->getTopics()];
+  $topics = $clientFactory->getTopics();
   $yamlTopics = Yaml::dump($topics);
   drush_print($yamlTopics);
 }

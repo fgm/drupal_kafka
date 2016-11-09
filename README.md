@@ -7,7 +7,8 @@
 ## Features
 
 * Drupal 8 [Queue API] backend. Queue names map to Kafka topics.
-  * Standard Drush commands to consume the queue: `drush queue-list` / `drush queue-run` 
+  * Standard Drush commands to consume the queue: `drush queue-list` / `drush queue-run`
+  * Code design documented in [`DESIGN.md`]
 * (planned): [PSR-3] Log appender. Logger channels map to Kafka topics.
 * Drush commands to 
   * check proper operation of the high-level consumer, low-level
@@ -20,6 +21,7 @@
 
 Based on [`php_rdkafka`] / [`librdkafka`].
 
+[`DESIGN.md`]: docs/DESIGN.md
 [`librdkafka`]: https://github.com/edenhill/librdkafka
 [`php_rdkafka`]: https://github.com/arnaud-lb/php-rdkafka
 [PSR-3]: http://www.php-fig.org/psr/psr-3/
@@ -37,8 +39,8 @@ version 2.0 or later (SPDX: GPL-2.0+).
 * Install the Drupal 8 site without the module.
 * Get IP, port, and list of topics names for the Kafka 0.10 broker you will be using.
 * Install the `librdkafka` client library.
-* Install the `php-rdkafka` PHP extension version 1 or 2 (see "Requirements" for details). In 2016-11, this means building from sources.
-* Install the module as usual
+* Install the `php-rdkafka` PHP extension version 1 or 2 (see "Requirements" for details).
+* Install the module as usual.
 * Configure Drupal `settings.php` to expose the Kafka queue, either as the 
   default queue backend, or for specific queue names, and point the services to
   the chosen Kafka brokers.
@@ -64,7 +66,9 @@ version 2.0 or later (SPDX: GPL-2.0+).
   * 2.0.0 or later for PHP 7.x
   * 1.0.0 or later for PHP 5.6.x
   * 0.9.1 is __NOT__ usable
+  * In 2016-11, this means building the extension from sources.
 * PHP 5.6.27 or more recent. Slightly earlier versions _might_ work but have not been evaluated
+
 
 ## Limitations
 

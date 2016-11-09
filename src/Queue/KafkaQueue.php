@@ -2,19 +2,61 @@
 
 namespace Drupal\kafka\Queue;
 
+use Drupal\Core\KeyValueStore\KeyValueFactoryInterface;
 use Drupal\Core\Queue\QueueGarbageCollectionInterface;
 use Drupal\Core\Queue\QueueInterface;
+use Drupal\Core\Site\Settings;
+use Drupal\Core\StringTranslation\TranslatableMarkup;
+use Drupal\kafka\ClientFactory;
 
 /**
  * Class KafkaQueue is a Drupal Queue backend.
  */
 class KafkaQueue implements QueueInterface, QueueGarbageCollectionInterface {
+  const KV_COLLECTION = 'kafka.queue';
 
   /**
-   * Cleans queues of garbage.
+   * @var \Drupal\kafka\ClientFactory
+   */
+  protected $clientFactory;
+
+  /**
+   * @var bool
+   */
+  protected $isDeleted = NULL;
+
+  /**
+   * @var \Drupal\Core\KeyValueStore\KeyValueStoreInterface
+   */
+  protected $kv;
+
+  /**
+   * @var string
+   */
+  protected $name;
+
+  /**
+   * @var string[]
+   */
+  protected $topics = [];
+
+  public function __construct($name, KeyValueFactoryInterface $kv, ClientFactory $clientFactory, Settings $settings) {
+    $this->clientFactory = $clientFactory;
+    $this->kv = $kv->get(static::KV_COLLECTION);
+    $this->name = $name;
+  }
+
+  /**
+   * {@inheritdoc}
    */
   public function garbageCollection() {
-    // TODO: Implement garbageCollection() method.
+    // FIXME there's a race condition here.
+    $queueList = array_keys($this->kv->get('__queues'));
+    $allQueues = $this->kv->getMultiple($queueList);
+    $remainingQueues = array_filter($allQueues);
+    $this->kv->set('__queues', $remainingQueues);
+    $deletedQueues = array_diff($allQueues, $remainingQueues);
+    $this->kv->deleteMultiple($deletedQueues);
   }
 
   /**
@@ -116,14 +158,32 @@ class KafkaQueue implements QueueInterface, QueueGarbageCollectionInterface {
    * depends on the queue implementation if this is necessary at all).
    */
   public function createQueue() {
-    $topics = $this->clientFactory->getTopics();
+    $name = $this->name;
+    $nameArg = ['@name' => $name];
+
+    $topics = $this->clientFactory->getTopics()['topics'];
+    if (!in_array($name, $topics)) {
+      throw new \DomainException(new TranslatableMarkup('Failed creating queue @name, which does not match an existing topic.', $nameArg));
+    }
+
+    // Avoid a race condition by not just using has()/set().
+    $set = $this->kv->setIfNotExists($name, TRUE);
+
+    if (!$set) {
+      throw new \InvalidArgumentException(new TranslatableMarkup('Trying to recreate existing queue @name.', $nameArg));
+    }
+
+    // FIXME there's a race conditions here, though.
+    $queues = $this->kv->get('__queues', []);
+    $queues[$name] = TRUE;
+    $this->kv->set('__queues', $queues);
   }
 
   /**
    * Deletes a queue and every item in the queue.
    */
   public function deleteQueue() {
-    // TODO: Implement deleteQueue() method.
+    $this->kv->set($this->name, FALSE );
   }
 
 }
