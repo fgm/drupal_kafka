@@ -46,6 +46,18 @@ class ClientFactory {
     $this->settings = $settings->get('kafka');
   }
 
+  /**
+   * Return settings or one specific setting for consumers.
+   *
+   * @param null|string $key
+   *   Optional. The key of a setting to return.
+   * @param mixed $default
+   *   Optional. The default value for a setting if $key is not empty.
+   *
+   * @return array|mixed|null
+   *   - If key is empty, the consumer settings as a keyed array,
+   *   - Else the value for the sêcificed setting, possibly defaulted.
+   */
   public function consumerSettings($key = NULL, $default = NULL) {
     $settings = isset($this->settings['consumer'])
       ? $this->settings['consumer']
@@ -56,6 +68,18 @@ class ClientFactory {
     return $ret;
   }
 
+  /**
+   * Return settings or one specific setting for producers.
+   *
+   * @param null|string $key
+   *   Optional. The key of a setting to return.
+   * @param mixed $default
+   *   Optional. The default value for a setting if $key is not empty.
+   *
+   * @return array|mixed|null
+   *   - If key is empty, the consumer settings as a keyed array,
+   *   - Else the value for the sêcificed setting, possibly defaulted.
+   */
   public function producerSettings($key = NULL, $default = NULL) {
     $settings = isset($this->settings['producer'])
       ? $this->settings['producer']

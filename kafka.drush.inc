@@ -3,6 +3,9 @@
 /**
  * @file
  * Drush plugin for Kafka module.
+ *
+ * These demo commands use the aggregator_feeds queue to take advantage of the
+ * existing queue worker for that queue.
  */
 
 use RdKafka\Conf;
@@ -180,7 +183,7 @@ function drush_kafka_producer_demo() {
   /** @var \RdKafka\Topic $topic */
   $topic = $rk->newTopic('aggregator_feeds');
 
-  $max = 1E4;
+  $max = 1E6;
   $t0 = microtime(TRUE);
   for ($i = 1; $i <= $max; $i++) {
     if ($i % ($max / 10) === 0) {
@@ -202,4 +205,52 @@ function drush_kafka_topics() {
   $topics = $clientFactory->getTopics();
   $yamlTopics = Yaml::dump($topics);
   drush_print($yamlTopics);
+}
+
+/**
+ * Drush callback for "kafka-queue-producer-demo".
+ */
+function drush_kafka_queue_producer_demo() {
+  $q = \Drupal::queue('aggregator_feeds');
+  // Ensure queue exists and it not deleted.
+  $q->createQueue();
+  $t0 = microtime(TRUE);
+  $max = 1E6;
+  foreach (range(1, $max) as $i) {
+    if ($i % ceil($max / 10) === 0) {
+      echo "$i\t";
+    }
+    $q->createItem("Message $i (" . time() . ")");
+  }
+  $t1 = microtime(TRUE);
+  $rate = round($max / ($t1 - $t0));
+  echo "\n$max messages @ $rate msg/sec\n";
+}
+
+function drush_kafka_queue_consumer_demo() {
+  $q = \Drupal::queue('aggregator_feeds');
+  // Ensure queue exists and it not deleted.
+  $q->createQueue();
+  $t1 = $t0 = microtime(TRUE);
+  $count = 0;
+  $oldLap = $t0;
+  while ($item = $q->claimItem(1)) {
+    if ($count === 0) {
+      // Check the time to first claim, caused by Kafka allocation.
+      $t1 = microtime(TRUE);
+    }
+    $newLap = microtime(TRUE);
+    if ($newLap - $oldLap > 1) {
+      $oldLap = $newLap;
+      echo "$count\t";
+    }
+    $count++;
+  }
+  $t2 = microtime(TRUE);
+  echo "count: $count\n";
+  echo "setup: " . round($t1 - $t0) . " sec, delay: " . round($t2 - $t1);
+  if ($count) {
+    echo " = " . (($count - 1) / round($t2 - $t1)) . " items/sec";
+  }
+  echo PHP_EOL;
 }

@@ -9,8 +9,6 @@ use Drupal\Core\Queue\QueueInterface;
 use Drupal\Core\Site\Settings;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\kafka\ClientFactory;
-use RdKafka\Conf;
-use RdKafka\TopicConf;
 
 /**
  * Class KafkaQueue is a Drupal Queue backend.
@@ -122,7 +120,12 @@ class KafkaQueue implements QueueInterface, QueueGarbageCollectionInterface {
   }
 
   /**
+   * Lazy fetch a configured, subscribed high-level consumer.
+   *
+   * @see KafkaQueue::__destruct()
+   *
    * @return \RdKafka\KafkaConsumer
+   *   The fully ready consumer instance.
    */
   protected function consumer() {
     if (!isset($this->consumer)) {
@@ -162,14 +165,9 @@ class KafkaQueue implements QueueInterface, QueueGarbageCollectionInterface {
    *   queue.
    */
   public function createItem($data) {
-    $item = new KafkaItem([
-      'created' => time(),
-      'data' => $data,
-      'item_id' => $uuid = $this->uuid->generate(),
-    ]);
-    $stringItem = json_encode($item);
-    $this->producerTopic()->produce(RD_KAFKA_PARTITION_UA, 0, $stringItem);
-    return $uuid;
+    $item = new KafkaItem($data, $this->uuid->generate());
+    $this->producerTopic()->produce(RD_KAFKA_PARTITION_UA, 0, $item->__toString());
+    return $item->item_id;
   }
 
   /**
@@ -202,7 +200,7 @@ class KafkaQueue implements QueueInterface, QueueGarbageCollectionInterface {
     switch ($message->err) {
       case RD_KAFKA_RESP_ERR_NO_ERROR:
         // TODO Do something with $message->offset for deleteItem / releaseItem.
-        $item = json_decode($message->payload);
+        $item = KafkaItem::fromString($message->payload);
         $error = FALSE;
         break;
 
