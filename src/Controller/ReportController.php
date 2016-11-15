@@ -2,10 +2,8 @@
 
 namespace Drupal\kafka\Controller;
 
-
 use Drupal\Core\DependencyInjection\ContainerInjectionInterface;
 use Drupal\Core\Site\Settings;
-use Drupal\Core\StringTranslation\StringTranslationTrait;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\Core\StringTranslation\TranslationInterface;
 use Drupal\kafka\ClientFactory;
@@ -37,6 +35,16 @@ class ReportController implements ContainerInjectionInterface {
    */
   protected $translation;
 
+  /**
+   * ReportController constructor.
+   *
+   * @param array $settings
+   *   The part of the settings related to Kafka.
+   * @param \Drupal\Core\StringTranslation\TranslationInterface $translation
+   *   The translation service.
+   * @param \Drupal\kafka\ClientFactory $clientFactory
+   *   The kafka.client_factory service.
+   */
   public function __construct(array $settings, TranslationInterface $translation, ClientFactory $clientFactory) {
     $this->clientFactory = $clientFactory;
     $this->settings = $settings;
@@ -52,7 +60,6 @@ class ReportController implements ContainerInjectionInterface {
     $translation = $container->get('string_translation');
     return new static($settings, $translation, $clientFactory);
   }
-
 
   /**
    * The Kafka report controller. It lists topics.
@@ -74,11 +81,12 @@ class ReportController implements ContainerInjectionInterface {
     ];
     $topics = $this->clientFactory->getTopics();
     $rows[] = [
-      new TranslatableMarkup('Topics', [], [], $this->translation),
-      ['data' => [
-        '#theme' => 'item_list',
-        '#items' => $topics,
-      ]],
+      new TranslatableMarkup('Topics', [], [], $this->translation), [
+        'data' => [
+          '#theme' => 'item_list',
+          '#items' => $topics,
+        ],
+      ],
     ];
 
     return [

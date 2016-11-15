@@ -5,7 +5,11 @@ parameters:
 services:
   queue.kafka:
     class: 'Drupal\kafka\Queue\KafkaQueueFactory'
-    arguments: ['@kafka.client_factory', '@keyvalue', '@settings']
+    arguments:
+      - '@kafka.client_factory'
+      - '@database'
+      - '@settings'
+      - '@uuid'
 
   kafka.client_factory:
     class: 'Drupal\kafka\ClientFactory'
@@ -23,5 +27,4 @@ services:
 
   kafka.producer:
     class: 'RdKafka\Producer'
-    factory: ['@kafka.client_factory', 'create']
-    arguments: ['producer']
+    factory: ['@kafka.client_factory', 'producer']

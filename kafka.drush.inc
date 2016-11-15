@@ -8,6 +8,7 @@
 use RdKafka\Conf;
 use RdKafka\KafkaConsumer;
 use RdKafka\TopicConf;
+use RdKafka\TopicPartition;
 use Symfony\Component\Yaml\Yaml;
 
 /**
@@ -21,7 +22,12 @@ function kafka_drush_command() {
 }
 
 /**
+ * Helper for high-level consumer: dump the partition list.
+ *
  * @param array<int,\RdKafka\TopicPartition> $partitions
+ *   An array of the partitions by id.
+ * @param null|string $label
+ *   Optional. A label for the display.
  */
 function _kafka_dump_partitions(array $partitions, $label = NULL) {
   if ($label) {
@@ -29,7 +35,7 @@ function _kafka_dump_partitions(array $partitions, $label = NULL) {
     $partition = reset($partitions);
     echo $label . $partition->getTopic() . "\n";
   }
-  echo implode('', array_map(function (\RdKafka\TopicPartition $partition) {
+  echo implode('', array_map(function (TopicPartition $partition) {
     return sprintf('%4s:%-8s%s', $partition->getPartition(), $partition->getOffset(),
       ($partition->getPartition() + 1) % 10 ? '' : "\n");
   }, $partitions)) . "\n";
@@ -56,7 +62,7 @@ function drush_kafka_high_level_consumer_demo() {
         break;
 
       case RD_KAFKA_RESP_ERR__REVOKE_PARTITIONS:
-        // _kafka_dump_partitions($partitions, "Revoke on: ");
+        _kafka_dump_partitions($partitions, "Revoke on: ");
         $kafka->assign(NULL);
         break;
 
@@ -99,6 +105,7 @@ function drush_kafka_high_level_consumer_demo() {
     $message = $consumer->consume(120 * 1000);
     switch ($message->err) {
       case RD_KAFKA_RESP_ERR_NO_ERROR:
+        // print_R($message);
         $count++;
         break;
 
@@ -136,7 +143,12 @@ function drush_kafka_low_level_consumer_demo() {
   $rk->setLogLevel(LOG_WARNING);
   $debug = FALSE;
 
-  $topic = $rk->newTopic('drupal');
+  $topicConf = new TopicConf();
+  $topicConf->set('offset.store.method', 'broker');
+  $topicConf->set('auto.offset.reset', 'smallest');
+  $topicConf->set('auto.commit.interval.ms', 100);
+  /** @var \RdKafka\ConsumerTopic $topic */
+  $topic = $rk->newTopic('drupal', $topicConf);
 
   // The first argument is the partition to consume from.
   // The second argument is the offset at which to start consumption. Valid
@@ -159,6 +171,7 @@ function drush_kafka_low_level_consumer_demo() {
       drush_print('Message: [' . $msg->payload . "]");
     }
   }
+  $topic->consumeStop(0);
   echo "count: $count\n";
   echo ($t1 = time()) . "\n";
   echo "delay: " . ($t1 - $t0) . "\n";
@@ -168,8 +181,10 @@ function drush_kafka_low_level_consumer_demo() {
  * Drush callback for "kafka-producer-demo".
  */
 function drush_kafka_producer_demo() {
+  /** @var \RdKafka\Producer $rk */
   $rk = \Drupal::service('kafka.producer');
   $rk->setLogLevel(LOG_WARNING);
+  /** @var \RdKafka\Topic $topic */
   $topic = $rk->newTopic('drupal');
 
   $max = 1E6;

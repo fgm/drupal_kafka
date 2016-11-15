@@ -2,77 +2,147 @@
 
 namespace Drupal\kafka\Queue;
 
-use Drupal\Core\KeyValueStore\KeyValueFactoryInterface;
+use Drupal\Component\Uuid\UuidInterface;
+use Drupal\Core\Database\Connection;
 use Drupal\Core\Queue\QueueGarbageCollectionInterface;
 use Drupal\Core\Queue\QueueInterface;
 use Drupal\Core\Site\Settings;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\kafka\ClientFactory;
+use RdKafka\Conf;
+use RdKafka\TopicConf;
 
 /**
  * Class KafkaQueue is a Drupal Queue backend.
  */
 class KafkaQueue implements QueueInterface, QueueGarbageCollectionInterface {
-  const KV_COLLECTION = 'kafka.queue';
+  const TABLE = 'kafka_queue';
 
   /**
+   * The kafka.client_factory service.
+   *
    * @var \Drupal\kafka\ClientFactory
    */
   protected $clientFactory;
 
   /**
+   * The consumer topic for the queue.
+   *
+   * @var \RdKafka\ConsumerTopic
+   */
+  protected $consumerTopic;
+
+  /**
+   * Is the queue deleted ?
+   *
    * @var bool
    */
   protected $isDeleted = NULL;
 
   /**
-   * @var \Drupal\Core\KeyValueStore\KeyValueStoreInterface
+   * The database service.
+   *
+   * @var \Drupal\Core\Database\Connection
    */
-  protected $kv;
+  protected $database;
 
   /**
+   * The queue name.
+   *
    * @var string
    */
   protected $name;
 
   /**
+   * The producer topic for the queue.
+   *
+   * @var \RdKafka\ProducerTopic
+   */
+  protected $producerTopic;
+
+  /**
+   * The available topics.
+   *
    * @var string[]
    */
   protected $topics = [];
 
-  public function __construct($name, KeyValueFactoryInterface $kv, ClientFactory $clientFactory, Settings $settings) {
+  /**
+   * The uuid service.
+   *
+   * @var \Drupal\Component\Uuid\UuidInterface
+   */
+  protected $uuid;
+
+  /**
+   * KafkaQueue constructor.
+   *
+   * @param string $name
+   *   The queue/topic name.
+   * @param \Drupal\Core\Database\Connection $database
+   *   The database service.
+   * @param \Drupal\kafka\ClientFactory $clientFactory
+   *   The kafka.client_factory service.
+   * @param \Drupal\Core\Site\Settings $settings
+   *   The settings service.
+   * @param \Drupal\Component\Uuid\UuidInterface $uuid
+   *   The uuid service.
+   */
+  public function __construct($name, Connection $database, ClientFactory $clientFactory, Settings $settings, UuidInterface $uuid) {
     $this->clientFactory = $clientFactory;
-    $this->kv = $kv->get(static::KV_COLLECTION);
+    $this->database = $database;
     $this->name = $name;
+    $this->uuid = $uuid;
   }
 
   /**
    * {@inheritdoc}
    */
   public function garbageCollection() {
-    // FIXME there's a race condition here.
-    $queueList = array_keys($this->kv->get('__queues'));
-    $allQueues = $this->kv->getMultiple($queueList);
-    $remainingQueues = array_filter($allQueues);
-    $this->kv->set('__queues', $remainingQueues);
-    $deletedQueues = array_diff($allQueues, $remainingQueues);
-    $this->kv->deleteMultiple($deletedQueues);
+    // Purge deleted queues.
+    $this->database->delete(static::TABLE)
+      ->condition('deleted', 1)
+      ->execute();
+  }
+
+  /**
+   * Lazy fetch the consumer topic for the queue.
+   *
+   * @return \RdKafka\ConsumerTopic
+   *   The topic.
+   */
+  protected function consumerTopic() {
+    if (!isset($this->consumerTopic)) {
+      $this->consumerTopic = $this
+        ->clientFactory
+        ->highLevelConsumer()
+        ->newTopic($this->name);
+    }
+
+    return $this->consumerTopic;
   }
 
   /**
    * Adds a queue item and store it directly to the queue.
    *
-   * @param $data
+   * @param mixed $data
    *   Arbitrary data to be associated with the new task in the queue.
    *
-   * @return
+   * @return false|string
    *   A unique ID if the item was successfully created and was (best effort)
    *   added to the queue, otherwise FALSE. We don't guarantee the item was
    *   committed to disk etc, but as far as we know, the item is now in the
    *   queue.
    */
   public function createItem($data) {
-    // TODO: Implement createItem() method.
+    $item = [
+      'created' => time(),
+      'data' => $data,
+      'item_id' => $uuid = $this->uuid->generate(),
+    ];
+    $stringItem = json_encode($item);
+    $this->producerTopic()->produce(RD_KAFKA_PARTITION_UA, 0, $stringItem);
+    return $uuid;
   }
 
   /**
@@ -86,45 +156,77 @@ class KafkaQueue implements QueueInterface, QueueGarbageCollectionInterface {
    * result might only be valid for a fraction of a second and not provide an
    * accurate representation.
    *
-   * @return
-   *   An integer estimate of the number of items in the queue.
+   * @return int
+   *   An integer estimate of the number of items in the queue: 0.
    */
   public function numberOfItems() {
-    // TODO: Implement numberOfItems() method.
+    return 0;
   }
 
   /**
-   * Claims an item in the queue for processing.
-   *
-   * @param $lease_time
-   *   How long the processing is expected to take in seconds, defaults to an
-   *   hour. After this lease expires, the item will be reset and another
-   *   consumer can claim the item. For idempotent tasks (which can be run
-   *   multiple times without side effects), shorter lease times would result
-   *   in lower latency in case a consumer fails. For tasks that should not be
-   *   run more than once (non-idempotent), a larger lease time will make it
-   *   more rare for a given task to run multiple times in cases of failure,
-   *   at the cost of higher latency.
-   *
-   * @return
-   *   On success we return an item object. If the queue is unable to claim an
-   *   item it returns false. This implies a best effort to retrieve an item
-   *   and either the queue is empty or there is some other non-recoverable
-   *   problem.
-   *
-   *   If returned, the object will have at least the following properties:
-   *   - data: the same as what what passed into createItem().
-   *   - item_id: the unique ID returned from createItem().
-   *   - created: timestamp when the item was put into the queue.
+   * {@inheritdoc}
    */
   public function claimItem($lease_time = 3600) {
-    // TODO: Implement claimItem() method.
+    $topicConf = new TopicConf();
+    $topicConf->set('auto.offset.reset', 'smallest');
+
+    $conf = new Conf();
+    $conf->set('group.id', 'myConsumerGroup');
+    $conf->setDefaultTopicConf($topicConf);
+
+    echo __LINE__ . "\n";
+    $consumer = $this->clientFactory->highLevelConsumer();
+    echo __LINE__ . "\n";
+    $consumer->subscribe([$this->name]);
+    echo __LINE__ . "\n";
+    /** @var \RdKafka\Message $message */
+    $message = $consumer->consume(120 * 1000);
+    echo __LINE__ . "\n";
+
+    switch ($message->err) {
+      case RD_KAFKA_RESP_ERR_NO_ERROR:
+        echo __LINE__ . "\n";
+        $consumer->commit();
+        echo __LINE__ . "\n";
+        // TODO Do something with $message->offset for deleteItem / releaseItem.
+        $item = json_decode($message->payload);
+        echo __LINE__ . "\n";
+        $error = FALSE;
+        echo __LINE__ . "\n";
+        break;
+
+      case RD_KAFKA_RESP_ERR__PARTITION_EOF:
+        echo __LINE__ . "\n";
+        // No more messages; will not wait for more.
+        $error = TRUE;
+        break;
+
+      case RD_KAFKA_RESP_ERR__TIMED_OUT:
+        echo __LINE__ . "\n";
+        // Timed out.
+        $error = TRUE;
+        break;
+
+      default:
+        echo __LINE__ . "\n";
+        // We should really throw, but the Queue API says not to do it:
+        // throw new \Exception($message->errstr(), $message->err);
+        // so we just return an error.
+        $error = TRUE;
+    }
+    echo __LINE__ . "\n";
+    $consumer->unsubscribe();
+    echo __LINE__ . "\n";
+
+    $ret = $error ? FALSE : $item;
+    echo __LINE__ . "\n";
+    return $ret;
   }
 
   /**
    * Deletes a finished item from the queue.
    *
-   * @param $item
+   * @param array $item
    *   The item returned by \Drupal\Core\Queue\QueueInterface::claimItem().
    */
   public function deleteItem($item) {
@@ -132,58 +234,81 @@ class KafkaQueue implements QueueInterface, QueueGarbageCollectionInterface {
   }
 
   /**
+   * Lazy fetch the product topic for the queue.
+   *
+   * @return \RdKafka\ProducerTopic
+   *   The topic.
+   */
+  protected function producerTopic() {
+    if (!isset($this->producerTopic)) {
+      $this->producerTopic = $this
+        ->clientFactory
+        ->producer()
+        ->newTopic($this->name);
+    }
+
+    return $this->producerTopic;
+  }
+
+  /**
    * Releases an item that the worker could not process.
    *
    * Another worker can come in and process it before the timeout expires.
    *
-   * @param $item
+   * @param object $item
    *   The item returned by \Drupal\Core\Queue\QueueInterface::claimItem().
    *
    * @return bool
    *   TRUE if the item has been released, FALSE otherwise.
    */
   public function releaseItem($item) {
-    // TODO: Implement releaseItem() method.
+    return FALSE;
   }
 
   /**
-   * Creates a queue.
+   * {@inheritdoc}
    *
-   * Called during installation and should be used to perform any necessary
-   * initialization operations. This should not be confused with the
-   * constructor for these objects, which is called every time an object is
-   * instantiated to operate on a queue. This operation is only needed the
-   * first time a given queue is going to be initialized (for example, to make
-   * a new database table or directory to hold tasks for the queue -- it
-   * depends on the queue implementation if this is necessary at all).
+   * Reject queues not matching a Kafka topic.
+   *
+   * Idempotent: it is not an error to create the queue repeatedly.
    */
   public function createQueue() {
     $name = $this->name;
-    $nameArg = ['@name' => $name];
 
     $topics = $this->clientFactory->getTopics()['topics'];
     if (!in_array($name, $topics)) {
-      throw new \DomainException(new TranslatableMarkup('Failed creating queue @name, which does not match an existing topic.', $nameArg));
+      throw new \DomainException(new TranslatableMarkup('Failed creating queue @name, which does not match an existing topic.', ['@name' => $name]));
     }
 
-    // Avoid a race condition by not just using has()/set().
-    $set = $this->kv->setIfNotExists($name, TRUE);
-
-    if (!$set) {
-      throw new \InvalidArgumentException(new TranslatableMarkup('Trying to recreate existing queue @name.', $nameArg));
-    }
-
-    // FIXME there's a race conditions here, though.
-    $queues = $this->kv->get('__queues', []);
-    $queues[$name] = TRUE;
-    $this->kv->set('__queues', $queues);
+    $this->database
+      ->merge(static::TABLE)
+      ->key('name', $name)
+      ->fields([
+        'deleted' => 0,
+      ])
+      ->execute();
   }
 
   /**
-   * Deletes a queue and every item in the queue.
+   * {@inheritdoc}
+   *
+   * Idempotent: it is not an error to delete the queue repeatedly, or delete
+   * a non-existent queue: it will be created as deleted.
+   *
+   * One of the side effects of deleting a queue is its creation without
+   * checking whether the topic exists in Kafka. This is not an issue, as it
+   * will not possible to use it for items until createQueue() is invoked, which
+   * will check whether the topic exists when it will actually be likely to be
+   * used.
    */
   public function deleteQueue() {
-    $this->kv->set($this->name, FALSE );
+    $this->database
+      ->merge(static::TABLE)
+      ->key('name', $this->name)
+      ->fields([
+        'deleted' => 1,
+      ])
+      ->execute();
   }
 
 }

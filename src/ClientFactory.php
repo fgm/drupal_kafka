@@ -4,12 +4,29 @@ namespace Drupal\kafka;
 
 use Drupal\Core\Site\Settings;
 use RdKafka\Conf;
+use RdKafka\Consumer;
+use RdKafka\KafkaConsumer;
+use RdKafka\Producer;
 
 /**
  * Class ClientFactory builds instances of producers and consumers.
  */
 class ClientFactory {
   const METADATA_TIMEOUT = 1000;
+
+  /**
+   * The high-level consumer instance.
+   *
+   * @var \RdKafka\KafkaConsumer
+   */
+  protected $highLevelConsumer;
+
+  /**
+   * The producer instance.
+   *
+   * @var \RdKafka\Producer
+   */
+  protected $producer;
 
   /**
    * The Kafka settings.
@@ -31,6 +48,9 @@ class ClientFactory {
   /**
    * The client factory method.
    *
+   * We always set the consumer group, not just for high-level consumers as
+   * would be expected, to avoid crashes of the php-rdkafka extension.
+   *
    * @param string $type
    *   Strings "low" and "high" for consumers, "producer" for producers.
    * @param \RdKafka\Conf|null $conf
@@ -41,37 +61,86 @@ class ClientFactory {
    *   A client instance.
    */
   public function create($type, Conf $conf = NULL) {
+    $consumerGroup = isset($this->settings['consumer']['group.id'])
+      ? $this->settings['consumer']['group.id']
+      : 'drupal';
+    if (!isset($conf)) {
+      $conf = new Conf();
+    }
+    $conf->set('group.id', $consumerGroup);
+
     switch ($type) {
       case 'low':
-        $class = 'RdKafka\Consumer';
-        $section = 'consumer';
+        $client = new Consumer($conf);
+        $client->addBrokers(implode(',', $this->settings['consumer']['brokers']));
         break;
 
       case 'high':
-        $class = 'RdKafka\KafkaConsumer';
-        $section = 'consumer';
-        if (!isset($conf)) {
-          $conf = new Conf();
-        }
-        $conf->set('metadata.broker.list', implode(',', $this->settings[$section]['brokers']));
+        $brokers = isset($this->settings['consumer']['brokers'])
+          ? $this->settings['consumer']['brokers']
+          : ['127.0.0.1:9092'];
+        $conf->set('metadata.broker.list', implode(',', $brokers));
+        $client = new KafkaConsumer($conf);
         break;
 
       case 'producer':
-        $class = 'RdKafka\Producer';
-        $section = 'producer';
+        $client = new Producer($conf);
+        $client->addBrokers(implode(',', $this->settings['producer']['brokers']));
         break;
 
       default:
         throw new \InvalidArgumentException("Invalid client type.");
     }
 
-    $client = isset($conf) ? new $class($conf) : new $class();
-
-    // KafkaConsumer uses $conf exclusively. See switch() above.
-    if (method_exists($client, 'addBrokers')) {
-      $client->addBrokers(implode(',', $this->settings[$section]['brokers']));
-    }
     return $client;
+  }
+
+  /**
+   * Lazy fetch the high-level consumer instance.
+   *
+   * @return \RdKafka\KafkaConsumer
+   *   The consumer instance.
+   */
+  public function highLevelConsumer() {
+    if (!isset($this->highLevelConsumer)) {
+      $this->setHighLevelConsumer($this->create('high'));
+    }
+
+    return $this->highLevelConsumer;
+  }
+
+  /**
+   * Return the single producer instance known by this factory.
+   *
+   * @return \RdKafka\Producer
+   *   The producer instance.
+   */
+  public function producer() {
+    if (!isset($this->producer)) {
+      $this->setProducer($this->create('producer'));
+    }
+
+    return $this->producer;
+  }
+
+  /**
+   * Setter for the high-level consumer.
+   *
+   * @param \RdKafka\KafkaConsumer $consumer
+   *   A consumer instance.
+   */
+  public function setHighLevelConsumer(KafkaConsumer $consumer) {
+    $this->highLevelConsumer = $consumer;
+  }
+
+  /**
+   * Set a customized producer as the instance know by this factory.
+   *
+   * @param \RdKafka\Producer $producer
+   *   A producer instance.
+   */
+  public function setProducer(Producer $producer) {
+    $this->producer = $producer;
   }
 
   /**
@@ -93,7 +162,7 @@ class ClientFactory {
 
     // Expected time per pass (local, 1 topic): 36 msec = 28/sec
     // Should be O(n)*O(m) per pass/topic.
-    foreach ($sources as $index => $rdk) {
+    foreach ($sources as $rdk) {
       $rdk->setLogLevel(LOG_INFO);
 
       /** @var \RdKafka\Metadata $meta */
@@ -117,7 +186,7 @@ class ClientFactory {
 
     $topics = [
       'topics' => $topics,
-      'duration' => $t1 - $t0
+      'duration' => $t1 - $t0,
     ];
 
     return $topics;

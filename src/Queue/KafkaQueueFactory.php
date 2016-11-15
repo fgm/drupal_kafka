@@ -2,8 +2,8 @@
 
 namespace Drupal\kafka\Queue;
 
-use Drupal\Core\KeyValueStore\KeyValueFactoryInterface;
-use Drupal\Core\KeyValueStore\KeyValueStoreInterface;
+use Drupal\Component\Uuid\UuidInterface;
+use Drupal\Core\Database\Connection;
 use Drupal\Core\Site\Settings;
 use Drupal\kafka\ClientFactory;
 
@@ -20,11 +20,11 @@ class KafkaQueueFactory {
   protected $clientFactory;
 
   /**
-   * The keyvalue service.
+   * The database service.
    *
-   * @var \Drupal\Core\KeyValueStore\KeyValueStoreInterface
+   * @var \Drupal\Core\Database\Connection
    */
-  protected $kv;
+  protected $database;
 
   /**
    * The settings service.
@@ -36,34 +36,37 @@ class KafkaQueueFactory {
   /**
    * KafkaQueue constructor.
    *
-   * @param \Drupal\Core\KeyValueStore\KeyValueFactoryInterface $kv
-   *   The keyvalue service.
    * @param \Drupal\kafka\ClientFactory $clientFactory
    *   The kafka.client_factory service.
+   * @param \Drupal\Core\Database\Connection $database
+   *   The database service.
    * @param \Drupal\Core\Site\Settings $settings
    *   The settings service.
+   * @param \Drupal\Component\Uuid\UuidInterface $uuid
+   *   The uuid service.
    */
   public function __construct(
     ClientFactory $clientFactory,
-    KeyValueFactoryInterface $kv,
-    Settings $settings) {
-      $this->clientFactory = $clientFactory;
-      $this->kv = $kv;
-      $this->settings = $settings;
-    }
-
+    Connection $database,
+    Settings $settings,
+    UuidInterface $uuid) {
+    $this->clientFactory = $clientFactory;
+    $this->database = $database;
+    $this->settings = $settings;
+    $this->uuid = $uuid;
+  }
 
   /**
    * Return a queue from its name.
    *
    * @param string $name
-   *   The queue name
+   *   The queue name.
    *
    * @return \Drupal\Core\Queue\QueueInterface
    *   The queue instance
    */
   public function get($name) {
-    $queue = new KafkaQueue($name, $this->kv, $this->clientFactory, $this->settings);
+    $queue = new KafkaQueue($name, $this->database, $this->clientFactory, $this->settings, $this->uuid);
     return $queue;
   }
 
