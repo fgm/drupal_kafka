@@ -7,6 +7,7 @@ use RdKafka\Conf;
 use RdKafka\Consumer;
 use RdKafka\KafkaConsumer;
 use RdKafka\Producer;
+use RdKafka\TopicConf;
 
 /**
  * Class ClientFactory builds instances of producers and consumers.
@@ -45,6 +46,26 @@ class ClientFactory {
     $this->settings = $settings->get('kafka');
   }
 
+  public function consumerSettings($key = NULL, $default = NULL) {
+    $settings = isset($this->settings['consumer'])
+      ? $this->settings['consumer']
+      : [];
+    $ret = isset($key)
+      ? (isset($settings[$key]) ? $settings[$key] : $default)
+      : $settings;
+    return $ret;
+  }
+
+  public function producerSettings($key = NULL, $default = NULL) {
+    $settings = isset($this->settings['producer'])
+      ? $this->settings['producer']
+      : [];
+    $ret = isset($key)
+      ? (isset($settings[$key]) ? $settings[$key] : $default)
+      : $settings;
+    return $ret;
+  }
+
   /**
    * The client factory method.
    *
@@ -61,31 +82,33 @@ class ClientFactory {
    *   A client instance.
    */
   public function create($type, Conf $conf = NULL) {
-    $consumerGroup = isset($this->settings['consumer']['group.id'])
-      ? $this->settings['consumer']['group.id']
-      : 'drupal';
+    $consumerGroup = $this->consumerSettings('group.id', 'drupal');
+    $defaultBrokers = ['127.0.0.1:9092'];
+
     if (!isset($conf)) {
       $conf = new Conf();
     }
     $conf->set('group.id', $consumerGroup);
 
+    $topicConf = new TopicConf();
+    $topicConf->set('auto.offset.reset', 'smallest');
+    $conf->setDefaultTopicConf($topicConf);
+
     switch ($type) {
       case 'low':
         $client = new Consumer($conf);
-        $client->addBrokers(implode(',', $this->settings['consumer']['brokers']));
+        $client->addBrokers(implode(',', $this->consumerSettings('brokers', $defaultBrokers)));
         break;
 
       case 'high':
-        $brokers = isset($this->settings['consumer']['brokers'])
-          ? $this->settings['consumer']['brokers']
-          : ['127.0.0.1:9092'];
-        $conf->set('metadata.broker.list', implode(',', $brokers));
+        $brokers = implode(',', $this->consumerSettings('brokers', $defaultBrokers));
+        $conf->set('metadata.broker.list', $brokers);
         $client = new KafkaConsumer($conf);
         break;
 
       case 'producer':
         $client = new Producer($conf);
-        $client->addBrokers(implode(',', $this->settings['producer']['brokers']));
+        $client->addBrokers(implode(',', $this->producerSettings('brokers')));
         break;
 
       default:

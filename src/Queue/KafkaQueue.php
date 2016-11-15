@@ -26,6 +26,13 @@ class KafkaQueue implements QueueInterface, QueueGarbageCollectionInterface {
   protected $clientFactory;
 
   /**
+   * A configured, subscribed consumer instance, or null.
+   *
+   * @var \RdKafka\KafkaConsumer
+   */
+  protected $consumer;
+
+  /**
    * The consumer topic for the queue.
    *
    * @var \RdKafka\ConsumerTopic
@@ -96,6 +103,15 @@ class KafkaQueue implements QueueInterface, QueueGarbageCollectionInterface {
   }
 
   /**
+   * Warn Kafka that we unsubscribe.
+   */
+  public function __destruct() {
+    if (isset($this->consumer)) {
+      $this->consumer->unsubscribe();
+    }
+  }
+
+  /**
    * {@inheritdoc}
    */
   public function garbageCollection() {
@@ -103,6 +119,17 @@ class KafkaQueue implements QueueInterface, QueueGarbageCollectionInterface {
     $this->database->delete(static::TABLE)
       ->condition('deleted', 1)
       ->execute();
+  }
+
+  /**
+   * @return \RdKafka\KafkaConsumer
+   */
+  protected function consumer() {
+    if (!isset($this->consumer)) {
+      $this->consumer = $this->clientFactory->highLevelConsumer();
+      $this->consumer->subscribe([$this->name]);
+    }
+    return $this->consumer;
   }
 
   /**
@@ -135,11 +162,11 @@ class KafkaQueue implements QueueInterface, QueueGarbageCollectionInterface {
    *   queue.
    */
   public function createItem($data) {
-    $item = [
+    $item = new KafkaItem([
       'created' => time(),
       'data' => $data,
       'item_id' => $uuid = $this->uuid->generate(),
-    ];
+    ]);
     $stringItem = json_encode($item);
     $this->producerTopic()->produce(RD_KAFKA_PARTITION_UA, 0, $stringItem);
     return $uuid;
@@ -167,59 +194,36 @@ class KafkaQueue implements QueueInterface, QueueGarbageCollectionInterface {
    * {@inheritdoc}
    */
   public function claimItem($lease_time = 3600) {
-    $topicConf = new TopicConf();
-    $topicConf->set('auto.offset.reset', 'smallest');
+    $consumer = $this->consumer();
 
-    $conf = new Conf();
-    $conf->set('group.id', 'myConsumerGroup');
-    $conf->setDefaultTopicConf($topicConf);
-
-    echo __LINE__ . "\n";
-    $consumer = $this->clientFactory->highLevelConsumer();
-    echo __LINE__ . "\n";
-    $consumer->subscribe([$this->name]);
-    echo __LINE__ . "\n";
     /** @var \RdKafka\Message $message */
-    $message = $consumer->consume(120 * 1000);
-    echo __LINE__ . "\n";
+    $message = $consumer->consume($this->clientFactory->consumerSettings('timeout', 100));
 
     switch ($message->err) {
       case RD_KAFKA_RESP_ERR_NO_ERROR:
-        echo __LINE__ . "\n";
-        $consumer->commit();
-        echo __LINE__ . "\n";
         // TODO Do something with $message->offset for deleteItem / releaseItem.
         $item = json_decode($message->payload);
-        echo __LINE__ . "\n";
         $error = FALSE;
-        echo __LINE__ . "\n";
         break;
 
       case RD_KAFKA_RESP_ERR__PARTITION_EOF:
-        echo __LINE__ . "\n";
         // No more messages; will not wait for more.
         $error = TRUE;
         break;
 
       case RD_KAFKA_RESP_ERR__TIMED_OUT:
-        echo __LINE__ . "\n";
         // Timed out.
         $error = TRUE;
         break;
 
       default:
-        echo __LINE__ . "\n";
         // We should really throw, but the Queue API says not to do it:
         // throw new \Exception($message->errstr(), $message->err);
         // so we just return an error.
         $error = TRUE;
     }
-    echo __LINE__ . "\n";
-    $consumer->unsubscribe();
-    echo __LINE__ . "\n";
 
     $ret = $error ? FALSE : $item;
-    echo __LINE__ . "\n";
     return $ret;
   }
 

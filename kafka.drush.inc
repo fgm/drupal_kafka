@@ -71,13 +71,6 @@ function drush_kafka_high_level_consumer_demo() {
     }
   });
 
-  // Configure the group.id. All consumer with the same group.id will consume
-  // different partitions.
-  $conf->set('group.id', 'myConsumerGroup');
-
-  /* Initial list of Kafka brokers. Not needed with the Drupal service.
-  $conf->set('metadata.broker.list', '127.0.0.1');
-   */
   $topicConf = new TopicConf();
 
   // Set where to start consuming messages when there is no initial offset in
@@ -93,7 +86,7 @@ function drush_kafka_high_level_consumer_demo() {
   $consumer = $clientFactory->create('high', $conf);
 
   // Subscribe to topic 'drupal'.
-  $consumer->subscribe(['drupal']);
+  $consumer->subscribe(['aggregator_feeds']);
 
   echo "Waiting for partition assignment... (make take some time when\n";
   echo "quickly re-joining the group after leaving it.)\n";
@@ -185,15 +178,15 @@ function drush_kafka_producer_demo() {
   $rk = \Drupal::service('kafka.producer');
   $rk->setLogLevel(LOG_WARNING);
   /** @var \RdKafka\Topic $topic */
-  $topic = $rk->newTopic('drupal');
+  $topic = $rk->newTopic('aggregator_feeds');
 
-  $max = 1E6;
+  $max = 1E4;
   $t0 = microtime(TRUE);
   for ($i = 1; $i <= $max; $i++) {
     if ($i % ($max / 10) === 0) {
       echo "$i\t";
     }
-    $topic->produce(RD_KAFKA_PARTITION_UA, 0, "Message $i (" . time() . ")");
+    $topic->produce(RD_KAFKA_PARTITION_UA, 0, json_encode("Message $i (" . time() . ")"));
   }
   $t1 = microtime(TRUE);
   $rate = round($max / ($t1 - $t0));
