@@ -11,12 +11,16 @@
   * Code design documented in [`DESIGN.md`]
 * (planned): [PSR-3] Log appender. Logger channels map to Kafka topics.
 * Drush commands to 
+  * check proper operation of the Queue API adapter
+    * `drush kqpd`: producer demo via Queue API
+    * `drush kqcd`: consumer demo via Queue API
+    * Existing core `drush queue-run` command works
   * check proper operation of the high-level consumer, low-level
     consumer, and producer in relation with a Kafka instance, e.g.  check IP / 
     port / credentials: 
-    * `drush kpd`: producer demo
-    * `drush khlcd`: high-level consumer demo
-    * `drush kllcd`: low-level consumer demo
+    * `drush kpd`: producer demo, extension-level
+    * `drush khlcd`: high-level consumer demo, extension-level
+    * `drush kllcd`: low-level consumer demo, extension-level
   * check available topics `drush kafka-topics`.
 
 Based on [`php_rdkafka`] / [`librdkafka`].
