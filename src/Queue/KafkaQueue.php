@@ -4,14 +4,21 @@ namespace Drupal\kafka\Queue;
 
 use Drupal\Component\Uuid\UuidInterface;
 use Drupal\Core\Database\Connection;
+use Drupal\Core\Database\Query\Merge;
 use Drupal\Core\Queue\QueueGarbageCollectionInterface;
 use Drupal\Core\Queue\QueueInterface;
+use Drupal\Core\Queue\SuspendQueueException;
 use Drupal\Core\Site\Settings;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\kafka\ClientFactory;
 
 /**
  * Class KafkaQueue is a Drupal Queue backend.
+ *
+ * Queues match Kafka topics and have a DB representation:
+ * - queues can be marked deleted: this does not affect Kafka
+ * - queues can only be used is they have been created and are not deleted.
+ * - queues are removed from Kafka and the DB on garbage collection.
  */
 class KafkaQueue implements QueueInterface, QueueGarbageCollectionInterface {
   const TABLE = 'kafka_queue';
@@ -40,9 +47,16 @@ class KafkaQueue implements QueueInterface, QueueGarbageCollectionInterface {
   /**
    * Is the queue deleted ?
    *
-   * @var bool
+   * @var bool|null
    */
   protected $isDeleted = NULL;
+
+  /**
+   * Is the queue created in the DB ?
+   *
+   * @var bool|null
+   */
+  protected $isExisting = NULL;
 
   /**
    * The database service.
@@ -98,6 +112,8 @@ class KafkaQueue implements QueueInterface, QueueGarbageCollectionInterface {
     $this->database = $database;
     $this->name = $name;
     $this->uuid = $uuid;
+
+    $this->checkQueueStatus();
   }
 
   /**
@@ -112,11 +128,43 @@ class KafkaQueue implements QueueInterface, QueueGarbageCollectionInterface {
   /**
    * {@inheritdoc}
    */
-  public function garbageCollection() {
-    // Purge deleted queues.
-    $this->database->delete(static::TABLE)
-      ->condition('deleted', 1)
-      ->execute();
+  public function claimItem($lease_time = 3600) {
+    // Same unspecified behavior as core DatabaseQueue::claimItem().
+    if (!$this->isExisting || $this->isDeleted) {
+      return FALSE;
+    }
+
+    $consumer = $this->consumer();
+
+    /** @var \RdKafka\Message $message */
+    $message = $consumer->consume($this->clientFactory->consumerSettings('timeout', 100));
+
+    switch ($message->err) {
+      case RD_KAFKA_RESP_ERR_NO_ERROR:
+        // TODO Do something with $message->offset for deleteItem / releaseItem.
+        $item = KafkaItem::fromString($message->payload);
+        $error = FALSE;
+        break;
+
+      case RD_KAFKA_RESP_ERR__PARTITION_EOF:
+        // No more messages; will not wait for more.
+        $error = TRUE;
+        break;
+
+      case RD_KAFKA_RESP_ERR__TIMED_OUT:
+        // Timed out.
+        $error = TRUE;
+        break;
+
+      default:
+        // We should really throw, but the Queue API says not to do it:
+        // throw new \Exception($message->errstr(), $message->err);
+        // so we just return an error.
+        $error = TRUE;
+    }
+
+    $ret = $error ? FALSE : $item;
+    return $ret;
   }
 
   /**
@@ -153,6 +201,36 @@ class KafkaQueue implements QueueInterface, QueueGarbageCollectionInterface {
   }
 
   /**
+   * Check the queue status in the database and cache it on the instance.
+   *
+   * @return array
+   *   - 0: does queue exist ?
+   *   - 1: is queue marked as deleted ? Nonexistent queues are not.
+   */
+  protected function checkQueueStatus() {
+    $table = static::TABLE;
+    $sql = <<<SQL
+SELECT deleted 
+FROM {$table} q
+WHERE q.name = :name
+SQL;
+    $deleted = $this->database
+      ->query($sql, [':name' => $this->name])
+      ->fetchField();
+
+    if ($deleted === FALSE) {
+      $this->isExisting = FALSE;
+      $this->deleted = FALSE;
+    }
+    else {
+      $this->isExisting = TRUE;
+      $this->isDeleted = (bool) $deleted;
+    }
+
+    return [$this->isExisting, $this->isDeleted];
+  }
+
+  /**
    * Adds a queue item and store it directly to the queue.
    *
    * @param mixed $data
@@ -165,64 +243,42 @@ class KafkaQueue implements QueueInterface, QueueGarbageCollectionInterface {
    *   queue.
    */
   public function createItem($data) {
+    if (!$this->isExisting || $this->isDeleted) {
+      throw new \RuntimeException(new TranslatableMarkup(
+        "Queue @name is not usable at this time." , ['@name' => $this->name]
+      ));
+    }
+
     $item = new KafkaItem($data, $this->uuid->generate());
     $this->producerTopic()->produce(RD_KAFKA_PARTITION_UA, 0, $item->__toString());
     return $item->item_id;
   }
 
   /**
-   * Retrieves the number of items in the queue.
-   *
-   * This is intended to provide a "best guess" count of the number of items in
-   * the queue. Depending on the implementation and the setup, the accuracy of
-   * the results of this function may vary.
-   *
-   * e.g. On a busy system with a large number of consumers and items, the
-   * result might only be valid for a fraction of a second and not provide an
-   * accurate representation.
-   *
-   * @return int
-   *   An integer estimate of the number of items in the queue: 0.
-   */
-  public function numberOfItems() {
-    return 0;
-  }
-
-  /**
    * {@inheritdoc}
+   *
+   * Reject queues not matching a Kafka topic.
+   *
+   * Idempotent: it is not an error to create the queue repeatedly.
    */
-  public function claimItem($lease_time = 3600) {
-    $consumer = $this->consumer();
+  public function createQueue() {
+    $name = $this->name;
 
-    /** @var \RdKafka\Message $message */
-    $message = $consumer->consume($this->clientFactory->consumerSettings('timeout', 100));
-
-    switch ($message->err) {
-      case RD_KAFKA_RESP_ERR_NO_ERROR:
-        // TODO Do something with $message->offset for deleteItem / releaseItem.
-        $item = KafkaItem::fromString($message->payload);
-        $error = FALSE;
-        break;
-
-      case RD_KAFKA_RESP_ERR__PARTITION_EOF:
-        // No more messages; will not wait for more.
-        $error = TRUE;
-        break;
-
-      case RD_KAFKA_RESP_ERR__TIMED_OUT:
-        // Timed out.
-        $error = TRUE;
-        break;
-
-      default:
-        // We should really throw, but the Queue API says not to do it:
-        // throw new \Exception($message->errstr(), $message->err);
-        // so we just return an error.
-        $error = TRUE;
+    $topics = $this->clientFactory->getTopics()['topics'];
+    if (!in_array($name, $topics)) {
+      throw new \DomainException(new TranslatableMarkup('Failed creating queue @name, which does not match an existing topic.', ['@name' => $name]));
     }
 
-    $ret = $error ? FALSE : $item;
-    return $ret;
+    $this->database
+      ->merge(static::TABLE)
+      ->key('name', $name)
+      ->fields([
+        'deleted' => 0,
+      ])
+      ->execute();
+
+    $this->isExisting = TRUE;
+    $this->isDeleted = FALSE;
   }
 
   /**
@@ -233,6 +289,52 @@ class KafkaQueue implements QueueInterface, QueueGarbageCollectionInterface {
    */
   public function deleteItem($item) {
     // TODO: Implement deleteItem() method.
+  }
+
+  /**
+   * {@inheritdoc}
+   *
+   * Idempotent: it is not an error to delete the queue repeatedly, or delete
+   * a non-existent queue: it will be created as deleted.
+   *
+   * One of the side effects of deleting a queue is its creation without
+   * checking whether the topic exists in Kafka. This is not an issue, as it
+   * will not possible to use it for items until createQueue() is invoked, which
+   * will check whether the topic exists when it will actually be likely to be
+   * used.
+   */
+  public function deleteQueue() {
+    $this->database
+      ->merge(static::TABLE)
+      ->key('name', $this->name)
+      ->fields([
+        'deleted' => 1,
+      ])
+      ->execute();
+
+    $this->isExisting = TRUE;
+    $this->isDeleted = TRUE;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function garbageCollection() {
+    // Purge deleted queues.
+    $this->database->delete(static::TABLE)
+      ->condition('deleted', 1)
+      ->execute();
+
+    // The delete query may have changed the DB for our queue... or not.
+    $this->checkQueueStatus();
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function numberOfItems() {
+    // Information is not provided by Kafka, and 0 is a valid value.
+    return 0;
   }
 
   /**
@@ -265,52 +367,6 @@ class KafkaQueue implements QueueInterface, QueueGarbageCollectionInterface {
    */
   public function releaseItem($item) {
     return FALSE;
-  }
-
-  /**
-   * {@inheritdoc}
-   *
-   * Reject queues not matching a Kafka topic.
-   *
-   * Idempotent: it is not an error to create the queue repeatedly.
-   */
-  public function createQueue() {
-    $name = $this->name;
-
-    $topics = $this->clientFactory->getTopics()['topics'];
-    if (!in_array($name, $topics)) {
-      throw new \DomainException(new TranslatableMarkup('Failed creating queue @name, which does not match an existing topic.', ['@name' => $name]));
-    }
-
-    $this->database
-      ->merge(static::TABLE)
-      ->key('name', $name)
-      ->fields([
-        'deleted' => 0,
-      ])
-      ->execute();
-  }
-
-  /**
-   * {@inheritdoc}
-   *
-   * Idempotent: it is not an error to delete the queue repeatedly, or delete
-   * a non-existent queue: it will be created as deleted.
-   *
-   * One of the side effects of deleting a queue is its creation without
-   * checking whether the topic exists in Kafka. This is not an issue, as it
-   * will not possible to use it for items until createQueue() is invoked, which
-   * will check whether the topic exists when it will actually be likely to be
-   * used.
-   */
-  public function deleteQueue() {
-    $this->database
-      ->merge(static::TABLE)
-      ->key('name', $this->name)
-      ->fields([
-        'deleted' => 1,
-      ])
-      ->execute();
   }
 
 }
