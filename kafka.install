@@ -48,12 +48,12 @@ function kafka_schema() {
     'primary key' => ['name'],
   ];
 
-  $schema['kafka_items'] = [
+  $schema['kafka_item'] = [
     'description' => 'The items fetched from topics.',
     'fields' => [
       'queue' => $schema['kafka_queue']['fields']['name'],
       // https://github.com/apache/kafka/blob/0.10.1/clients/src/main/java/org/apache/kafka/clients/producer/Partitioner.java
-      'partition' => [
+      'partition_id' => [
         'description' => 'The Kafka partition number',
         'type' => 'int',
         'size' => 'normal',
@@ -61,15 +61,47 @@ function kafka_schema() {
         'default' => 0,
       ],
       // https://github.com/apache/kafka/blob/0.10.1/clients/src/main/java/org/apache/kafka/clients/consumer/OffsetAndMetadata.java
-      'item_id' => [
+      'offset' => [
         'description' => 'The Kafka item offset within a partition',
         'type' => 'int',
         'size' => 'big',
         'not null' => TRUE,
         'default' => 0,
       ],
+      'item_id' => [
+        'description' => 'The UUID of the item',
+        'type' => 'varchar_ascii',
+        // See \Drupal\Component\Uuid\Uuid::VALID_PATTERN.
+        'length' => 36,
+        'not null' => TRUE,
+
+      ],
+      'created' => [
+        'description' => 'The item creation timestamp',
+        'type' => 'int',
+        'size' => 'normal',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ],
+      'expires' => [
+        'description' => 'The item expiration timestamp',
+        'type' => 'int',
+        'size' => 'normal',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ],
+      'data' => [
+        'description' => 'The serialized item contents',
+        'type' => 'text',
+        'size' => 'normal',
+      ],
     ],
-    'primary key' => ['queue', 'partition', 'item_id'],
+    'primary key' => ['queue', 'partition_id', 'offset'],
+    'unique keys' => [
+      'item_id' => ['item_id'],
+    ],
     'foreign keys' => [
       'queue_name' => [
         'table' => 'kafka_queue',

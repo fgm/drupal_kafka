@@ -4,10 +4,8 @@ namespace Drupal\kafka\Queue;
 
 use Drupal\Component\Uuid\UuidInterface;
 use Drupal\Core\Database\Connection;
-use Drupal\Core\Database\Query\Merge;
 use Drupal\Core\Queue\QueueGarbageCollectionInterface;
 use Drupal\Core\Queue\QueueInterface;
-use Drupal\Core\Queue\SuspendQueueException;
 use Drupal\Core\Site\Settings;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\kafka\ClientFactory;
@@ -126,14 +124,67 @@ class KafkaQueue implements QueueInterface, QueueGarbageCollectionInterface {
   }
 
   /**
-   * {@inheritdoc}
+   * Claim an item from the database.
+   *
+   * Mostly derived from DatabaseQueue::claimItem(). Check the comments there
+   * for the not-so-intuitive logic.
+   *
+   * @param int $leaseTime
+   *   The lease duration, in seconds.
+   *
+   * @return false|\Drupal\kafka\Queue\KafkaItem
+   *   A fully initialized item, or FALSE if none was found in the DB.
    */
-  public function claimItem($lease_time = 3600) {
-    // Same unspecified behavior as core DatabaseQueue::claimItem().
-    if (!$this->isExisting || $this->isDeleted) {
-      return FALSE;
-    }
+  protected function claimFromDb($leaseTime) {
+    $expires = time() + $leaseTime;
+    while (TRUE) {
+      // This is only used if the table exists, so not exception check.
+      $tableName = KafkaItem::TABLE;
+      // More fields than just ki.created to have a reproducible ordering.
+      $sql = <<<SQL
+SELECT 
+  ki.data, ki.item_id, ki.created, 
+  ki.queue, ki.partition_id, ki.offset, ki.expires  
+FROM kafka_item ki 
+WHERE ki.expires = 0 AND ki.queue = :queue 
+ORDER BY ki.created, ki.item_id ASC
+SQL;
+      $dbItem = $this->database
+        ->queryRange($sql, 0, 1, [':queue' => $this->name])
+        ->fetchObject();
 
+      if (empty($dbItem->item_id)) {
+        return FALSE;
+      }
+
+      $update = $this->database
+        ->update($tableName)
+        ->fields(['expires' => $expires])
+        ->condition('item_id', $dbItem->item_id)
+        ->condition('expires', 0);
+
+      if ($update->execute()) {
+        $item = new KafkaItem($dbItem->data, $dbItem->item_id, $dbItem->created);
+        $item->queue = $dbItem->queue;
+        $item->partition = $dbItem->partition_id;
+        $item->offset = $dbItem->offset;
+        // The dbItem object does not contain the updated $expires value.
+        $item->expires = $expires;
+        return $item;
+      }
+    }
+  }
+
+  /**
+   * Claim an item from a Kafka topic.
+   *
+   * @param int $leaseTime
+   *   The lease duration, in seconds.
+   *
+   * @return bool|\Drupal\kafka\Queue\KafkaItem
+   *   A fully initialized item, or FALSE if none was found in the DB.
+   */
+  protected function claimFromKafka($leaseTime) {
     $consumer = $this->consumer();
 
     /** @var \RdKafka\Message $message */
@@ -141,8 +192,12 @@ class KafkaQueue implements QueueInterface, QueueGarbageCollectionInterface {
 
     switch ($message->err) {
       case RD_KAFKA_RESP_ERR_NO_ERROR:
-        // TODO Do something with $message->offset for deleteItem / releaseItem.
         $item = KafkaItem::fromString($message->payload);
+        $item->queue = $this->name;
+        $item->partition = $message->partition;
+        $item->offset = $message->offset;
+        $item->expires = time() + $leaseTime;
+        $item->persist($this->database);
         $error = FALSE;
         break;
 
@@ -165,6 +220,24 @@ class KafkaQueue implements QueueInterface, QueueGarbageCollectionInterface {
 
     $ret = $error ? FALSE : $item;
     return $ret;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function claimItem($lease_time = 3600) {
+    // Same unspecified behavior as core DatabaseQueue::claimItem().
+    if (!$this->isExisting || $this->isDeleted) {
+      return FALSE;
+    }
+
+    $item = $this->claimFromDb($lease_time);
+    if ($item instanceof KafkaItem) {
+      return $item;
+    }
+
+    $item = $this->claimFromKafka($lease_time);
+    return $item;
   }
 
   /**
@@ -245,12 +318,12 @@ SQL;
   public function createItem($data) {
     if (!$this->isExisting || $this->isDeleted) {
       throw new \RuntimeException(new TranslatableMarkup(
-        "Queue @name is not usable at this time." , ['@name' => $this->name]
+        "Queue @name is not usable at this time.", ['@name' => $this->name]
       ));
     }
 
     $item = new KafkaItem($data, $this->uuid->generate());
-    $this->producerTopic()->produce(RD_KAFKA_PARTITION_UA, 0, $item->__toString());
+    $this->producerTopic()->produce(RD_KAFKA_PARTITION_UA, 0, $item->payloadString());
     return $item->item_id;
   }
 
@@ -282,13 +355,11 @@ SQL;
   }
 
   /**
-   * Deletes a finished item from the queue.
-   *
-   * @param array $item
-   *   The item returned by \Drupal\Core\Queue\QueueInterface::claimItem().
+   * {@inheritdoc}
    */
   public function deleteItem($item) {
-    // TODO: Implement deleteItem() method.
+    /** @var \Drupal\kafka\Queue\KafkaItem $item */
+    $item->volatilize($this->database);
   }
 
   /**
@@ -310,6 +381,11 @@ SQL;
       ->fields([
         'deleted' => 1,
       ])
+      ->execute();
+
+    $this->database
+      ->delete(KafkaItem::TABLE)
+      ->condition('queue', $this->name)
       ->execute();
 
     $this->isExisting = TRUE;
@@ -355,18 +431,12 @@ SQL;
   }
 
   /**
-   * Releases an item that the worker could not process.
-   *
-   * Another worker can come in and process it before the timeout expires.
-   *
-   * @param object $item
-   *   The item returned by \Drupal\Core\Queue\QueueInterface::claimItem().
-   *
-   * @return bool
-   *   TRUE if the item has been released, FALSE otherwise.
+   * {@inheritdoc}
    */
   public function releaseItem($item) {
-    return FALSE;
+    /** @var \Drupal\kafka\Queue\KafkaItem $item */
+    $item->release($this->database);
+    return TRUE;
   }
 
 }

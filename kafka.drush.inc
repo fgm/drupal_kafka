@@ -215,7 +215,7 @@ function drush_kafka_queue_producer_demo() {
   // Ensure queue exists and it not deleted.
   $q->createQueue();
   $t0 = microtime(TRUE);
-  $max = 1E6;
+  $max = 10;
   foreach (range(1, $max) as $i) {
     if ($i % ceil($max / 10) === 0) {
       echo "$i\t";
@@ -227,6 +227,9 @@ function drush_kafka_queue_producer_demo() {
   echo "\n$max messages @ $rate msg/sec\n";
 }
 
+/**
+ * Drush callback for "kafka-queue-consumer-demo".
+ */
 function drush_kafka_queue_consumer_demo() {
   $q = \Drupal::queue('aggregator_feeds');
   // Ensure queue exists and it not deleted.
@@ -239,6 +242,7 @@ function drush_kafka_queue_consumer_demo() {
       // Check the time to first claim, caused by Kafka allocation.
       $t1 = microtime(TRUE);
     }
+    $q->deleteItem($item);
     $newLap = microtime(TRUE);
     if ($newLap - $oldLap > 1) {
       $oldLap = $newLap;
